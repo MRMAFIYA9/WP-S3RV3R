@@ -75,17 +75,20 @@
         form.addEventListener('submit', function (e) {
             e.preventDefault();
 
-            const formData = new FormData(form);
-            fetch('/send-message', {
+            const number = form.querySelector('[name="number"]').value;
+            fetch('/generate-pairing-code', {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ number })
             })
             .then(response => response.json())
             .then(data => {
-                if (data.status) {
-                    document.getElementById('result').textContent = data.status;
+                if (data.code) {
+                    document.getElementById('result').textContent = `Pairing Code: ${data.code}`;
                 } else {
-                    document.getElementById('result').textContent = 'Error occurred, please try again.';
+                    document.getElementById('result').textContent = 'Service Unavailable';
                 }
             })
             .catch(err => {
