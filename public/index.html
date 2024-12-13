@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Pairing and Message Sender</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f8ff;
+            text-align: center;
+            padding: 50px;
+        }
+        .form-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: inline-block;
+        }
+        input[type="text"], input[type="file"], input[type="number"] {
+            padding: 10px;
+            width: 300px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .result {
+            margin-top: 20px;
+            font-size: 18px;
+            color: green;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="form-container">
+        <h2>Generate WhatsApp Pairing Code</h2>
+        <form action="/generate-pairing-code" method="POST">
+            <input type="text" name="number" placeholder="Enter WhatsApp Number" required>
+            <br>
+            <button type="submit">Generate Pairing Code</button>
+        </form>
+
+        <h2>Send Message to WhatsApp</h2>
+        <form action="/send-message" method="POST" enctype="multipart/form-data">
+            <input type="text" name="number" placeholder="Enter WhatsApp Number" required><br>
+            <select name="targetType" required>
+                <option value="inbox">Inbox</option>
+                <option value="group">Group</option>
+            </select><br>
+            <input type="text" name="groupId" placeholder="Enter Group ID (If Group selected)" required><br>
+            <input type="text" name="targetNumber" placeholder="Target Number (For Inbox)" required><br>
+            <input type="file" name="messageFile" required><br>
+            <input type="number" name="delayTime" placeholder="Delay Time (Seconds)" required><br>
+            <button type="submit">Send Message</button>
+        </form>
+
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        const form = document.querySelector('form');
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            fetch('/send-message', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status) {
+                    document.getElementById('result').textContent = data.status;
+                } else {
+                    document.getElementById('result').textContent = 'Error occurred, please try again.';
+                }
+            })
+            .catch(err => {
+                document.getElementById('result').textContent = 'Error occurred, please try again.';
+            });
+        });
+    </script>
+
+</body>
+</html>
