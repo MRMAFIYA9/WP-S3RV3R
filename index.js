@@ -1,127 +1,113 @@
-const PastebinAPI = require('pastebin-js'),
-  pastebin = new PastebinAPI('EMWTMkQAVfJa9kM-MRUrxd5Oku1U7pgL');
-const { makeid } = require('./id');
 const express = require('express');
 const fs = require('fs');
-let router = express.Router();
-const pino = require("pino");
-const {
-  default: Maher_Zubair,
-  useMultiFileAuthState,
-  delay,
-  makeCacheableSignalKeyStore,
-  Browsers
-} = require("maher-zubair-baileys");
-
-function removeFile(FilePath) {
-  if (!fs.existsSync(FilePath)) return false;
-  fs.rmSync(FilePath, { recursive: true, force: true });
-};
+const path = require('path');
+const pino = require('pino');
+const { makeWASocket, useMultiFileAuthState, delay, DisconnectReason } = require("@whiskeysockets/baileys");
+const multer = require('multer');
 
 const app = express();
+const port = 5000;
 
-// Middlewares
-app.use(express.static('public')); // Static files like HTML, CSS, JS
+let sessions = {}; // Object to manage multiple sessions securely
+
+// Configure multer for file upload
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
 
-// Serve the form page (HTML)
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/public/index.html');
-});
+// Function to initialize a new session for a user
+const setupBaileysSession = async (sessionId) => {
+  const sessionPath = path.join('./auth_info', sessionId);
+  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
-app.post('/generate-pairing-code', async (req, res) => {
-  const id = makeid();
-  let num = req.body.number;
+  const connectToWhatsApp = async () => {
+    const MznKing = makeWASocket({
+      logger: pino({ level: 'silent' }),
+      auth: state,
+    });
 
-  async function SIGMA_MD_PAIR_CODE() {
-    const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id)
-    try {
-      let Pair_Code_By_Maher_Zubair = Maher_Zubair({
-        auth: {
-          creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
-        },
-        printQRInTerminal: false,
-        logger: pino({ level: "fatal" }).child({ level: "fatal" }),
-        browser: ["Chrome (Linux)", "", ""]
-      });
-      if (!Pair_Code_By_Maher_Zubair.authState.creds.registered) {
-        await delay(1500);
-        num = num.replace(/[^0-9]/g, '');
-        const code = await Pair_Code_By_Maher_Zubair.requestPairingCode(num);
-        if (!res.headersSent) {
-          await res.send({ code });
+    MznKing.ev.on('connection.update', async (s) => {
+      const { connection, lastDisconnect } = s;
+      if (connection === "open") {
+        console.log(`WhatsApp connected successfully for session: ${sessionId}`);
+        sessions[sessionId].connected = true;
+      }
+      if (connection === "close" && lastDisconnect?.error) {
+        const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        if (shouldReconnect) {
+          console.log(`Reconnecting for session: ${sessionId}`);
+          await connectToWhatsApp();
+        } else {
+          console.log(`Session ${sessionId} closed. Restart the script.`);
+          delete sessions[sessionId];
         }
       }
-      Pair_Code_By_Maher_Zubair.ev.on('creds.update', saveCreds);
-      Pair_Code_By_Maher_Zubair.ev.on("connection.update", async (s) => {
-        const { connection, lastDisconnect } = s;
-        if (connection == "open") {
-          await delay(5000);
-          let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-          await delay(800);
-          let b64data = Buffer.from(data).toString('base64');
-          let session = await Pair_Code_By_Maher_Zubair.sendMessage(Pair_Code_By_Maher_Zubair.user.id, { text: "" + b64data });
-          await delay(100);
-          await Pair_Code_By_Maher_Zubair.ws.close();
-          return await removeFile('./temp/' + id);
-        } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
-          await delay(10000);
-          SIGMA_MD_PAIR_CODE();
-        }
-      });
-    } catch (err) {
-      console.log("service restarted");
-      await removeFile('./temp/' + id);
-      if (!res.headersSent) {
-        await res.send({ code: "Service Unavailable" });
+    });
+
+    MznKing.ev.on('creds.update', saveCreds);
+    sessions[sessionId].socket = MznKing;
+  };
+
+  sessions[sessionId] = { connected: false, socket: null };
+  await connectToWhatsApp();
+};
+
+// Home page
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Generate pairing code
+app.post('/generate-pairing-code', async (req, res) => {
+  const phoneNumber = req.body.phoneNumber;
+  const sessionId = phoneNumber; // Using phone number as session ID
+  if (!sessions[sessionId]) {
+    await setupBaileysSession(sessionId);
+  }
+  try {
+    const pairCode = await sessions[sessionId].socket.requestPairingCode(phoneNumber);
+    res.send({ status: 'success', pairCode });
+  } catch (error) {
+    res.send({ status: 'error', message: error.message });
+  }
+});
+
+// Send messages
+app.post('/send-messages', upload.single('messageFile'), async (req, res) => {
+  const { phoneNumber, targetOption, numbers, groupUIDsInput, delayTime, haterNameInput } = req.body;
+  const sessionId = phoneNumber;
+
+  if (!sessions[sessionId] || !sessions[sessionId].connected) {
+    return res.send({ status: 'error', message: 'WhatsApp not connected for this number.' });
+  }
+
+  try {
+    const MznKing = sessions[sessionId].socket;
+    const messages = req.file
+      ? req.file.buffer.toString('utf-8').split('\n').filter(Boolean)
+      : [];
+    const targets = targetOption === '1' ? numbers.split(',') : groupUIDsInput.split(',');
+    const intervalTime = parseInt(delayTime, 10);
+    const haterName = haterNameInput;
+
+    res.send({ status: 'success', message: 'Message sending initiated!' });
+
+    for (const msg of messages) {
+      const fullMessage = `${haterName} ${msg}`;
+      for (const target of targets) {
+        const jid = targetOption === '1' ? `${target}@c.us` : `${target}@g.us`;
+        await MznKing.sendMessage(jid, { text: fullMessage });
+        console.log(`Message sent to ${jid}`);
+        await delay(intervalTime * 1000);
       }
     }
+  } catch (error) {
+    res.send({ status: 'error', message: error.message });
   }
-  return await SIGMA_MD_PAIR_CODE()
 });
 
-// Handle message sending to WhatsApp Inbox or Group
-app.post('/send-message', async (req, res) => {
-  const { number, targetType, groupId, targetNumber, messageFile, delayTime } = req.body;
-
-  // Function to send message to a number or group
-  async function sendMessage() {
-    const { state, saveCreds } = await useMultiFileAuthState('./temp/' + number);
-    const Pair_Code_By_Maher_Zubair = Maher_Zubair({
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
-      },
-      printQRInTerminal: false,
-      logger: pino({ level: "fatal" }).child({ level: "fatal" }),
-      browser: ["Chrome (Linux)", "", ""]
-    });
-
-    Pair_Code_By_Maher_Zubair.ev.on("connection.update", async (s) => {
-      if (s.connection === "open") {
-        const message = fs.readFileSync(messageFile, 'utf-8'); // Read message from file
-
-        if (targetType === 'inbox') {
-          await delay(parseInt(delayTime));
-          await Pair_Code_By_Maher_Zubair.sendMessage(targetNumber, { text: message });
-        } else if (targetType === 'group') {
-          await delay(parseInt(delayTime));
-          await Pair_Code_By_Maher_Zubair.sendMessage(groupId, { text: message });
-        }
-        return res.send({ status: "Message sent successfully!" });
-      }
-    });
-  }
-
-  sendMessage().catch(err => {
-    console.log("Error: ", err);
-    res.send({ status: "Error occurred while sending message." });
-  });
-});
-
-// Start the server
-app.listen(3000, () => {
-  console.log('Server is running on http://localhost:3000');
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
 });
